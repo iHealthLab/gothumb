@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opendoor-labs/gothumb/Godeps/_workspace/src/github.com/DAddYE/vips"
-	"github.com/opendoor-labs/gothumb/Godeps/_workspace/src/github.com/julienschmidt/httprouter"
-	"github.com/opendoor-labs/gothumb/Godeps/_workspace/src/github.com/rlmcpherson/s3gof3r"
+	"github.com/joelchen/gothumb/Godeps/_workspace/src/github.com/DAddYE/vips"
+	"github.com/joelchen/gothumb/Godeps/_workspace/src/github.com/julienschmidt/httprouter"
+	"github.com/joelchen/gothumb/Godeps/_workspace/src/github.com/rlmcpherson/s3gof3r"
 )
 
 var (
