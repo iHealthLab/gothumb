@@ -203,10 +203,10 @@ func generateThumbnail(w http.ResponseWriter, rmethod, rpath string, sourceURL s
 	buf, err := vips.Resize(img, vips.Options{
 		Height:       int(height),
 		Width:        int(width),
-		Crop:         true,
+		Crop:         false,
 		Interpolator: vips.BICUBIC,
 		Gravity:      vips.CENTRE,
-		Quality:      50,
+		Quality:      33,
 	})
 	if err != nil {
 		responseCode := 500
