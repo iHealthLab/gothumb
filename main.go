@@ -339,9 +339,9 @@ func validateSignature(sig, pathPart string) error {
 	}
 	
 	actualSig := base64.URLEncoding.EncodeToString(h.Sum(nil))
-	fmt.Printf("actual: %s", actualSig)
+	log.Printf("actual: %s", actualSig)
 	signature, err := url.QueryUnescape(sig)
-	fmt.Printf("signature: %s", signature)
+	log.Printf("signature: %s", signature)
 	if err != nil {
 		return err
 	}
