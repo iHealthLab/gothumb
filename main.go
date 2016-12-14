@@ -337,7 +337,7 @@ func validateSignature(sig, pathPart string) error {
 		return err
 	}
 	actualSig := base64.URLEncoding.EncodeToString(h.Sum(nil))
-	signature, err := url.QueryUnescape(sig); err != nil {
+	if signature, err := url.QueryUnescape(sig); err != nil {
 		return err
 	}
 	// constant-time string comparison
