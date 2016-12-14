@@ -333,13 +333,18 @@ func validateSignature(sig, pathPart string) error {
 	}
 
 	h := hmac.New(sha1.New, securityKey)
+	
 	if _, err := h.Write([]byte(pathPart)); err != nil {
 		return err
 	}
+	
 	actualSig := base64.URLEncoding.EncodeToString(h.Sum(nil))
-	if signature, err := url.QueryUnescape(sig); err != nil {
+	signature, err := url.QueryUnescape(sig)
+	
+	if err != nil {
 		return err
 	}
+	
 	// constant-time string comparison
 	if subtle.ConstantTimeCompare([]byte(signature), []byte(actualSig)) != 1 {
 		return fmt.Errorf("signature mismatch")
