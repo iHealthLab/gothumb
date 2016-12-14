@@ -105,7 +105,7 @@ func handleResize(w http.ResponseWriter, req *http.Request, params httprouter.Pa
 	log.Printf("%s %s", req.Method, reqPath)
 	sourceURL, err := url.Parse(strings.TrimPrefix(params.ByName("source"), "/"))
 	if err != nil || !(sourceURL.Scheme == "http" || sourceURL.Scheme == "https") {
-		http.Error(w, "invalid source URL", 400)
+		http.Error(w, "invalid source URL: " + err.Error(), 400)
 		return
 	}
 
