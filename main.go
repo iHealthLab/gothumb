@@ -5,7 +5,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/subtle"
-	"encoding/hex"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"io"
