@@ -5,7 +5,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/subtle"
-	"encoding/base64"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -67,8 +67,8 @@ func main() {
 	}
 
 	router := httprouter.New()
-	router.HEAD("/:signature/:size/*source", handleResize)
-	router.GET("/:signature/:size/*source", handleResize)
+	router.HEAD("/:size/*source", handleResize)
+	router.GET("/:size/*source", handleResize)
 	log.Fatal(http.ListenAndServe(listenInterface, router))
 }
 
@@ -109,9 +109,13 @@ func handleResize(w http.ResponseWriter, req *http.Request, params httprouter.Pa
 		return
 	}
 
-	sig := params.ByName("signature")
-	pathToVerify := strings.TrimPrefix(reqPath, "/"+sig+"/")
-	if err := validateSignature(sig, pathToVerify); err != nil {
+	//sig := params.ByName("signature")
+	//pathToVerify := strings.TrimPrefix(reqPath, "/"+sig+"/")
+	log.Printf("reqPath: %s", reqPath)
+	signature := req.Header.Get("Signature")
+	log.Printf("signature: %s", signature)
+	pathToVerify := strings.TrimPrefix(reqPath, "/")
+	if err := validateSignature(signature, pathToVerify); err != nil {
 		http.Error(w, "invalid signature", 401)
 		return
 	}
@@ -122,7 +126,8 @@ func handleResize(w http.ResponseWriter, req *http.Request, params httprouter.Pa
 		return
 	}
 
-	resultPath := normalizePath(strings.TrimPrefix(reqPath, "/"+sig))
+	//resultPath := normalizePath(strings.TrimPrefix(reqPath, "/"+sig))
+	resultPath := normalizePath(reqPath)
 
 	// TODO(bgentry): everywhere that switches on resultBucket should switch on
 	// something like resultStorage instead.
