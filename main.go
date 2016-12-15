@@ -343,7 +343,7 @@ func validateSignature(sig, pathPart string) error {
 		return err
 	}
 	
-	actualSig := base64.URLEncoding.EncodeToString(h.Sum(nil))
+	actualSig := base64.StdEncoding.EncodeToString(h.Sum(nil))
 	log.Printf("actual: %s", actualSig)
 	log.Printf("signature: %s", sig)
 	
