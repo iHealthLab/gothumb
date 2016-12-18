@@ -3,7 +3,7 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/md5"
-	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"flag"
@@ -104,29 +104,26 @@ func handleResize(w http.ResponseWriter, req *http.Request, params httprouter.Pa
 	reqPath := req.URL.EscapedPath()
 	log.Printf("%s %s", req.Method, reqPath)
 	sourceURL, err := url.Parse(strings.TrimPrefix(params.ByName("source"), "/"))
+
 	if err != nil || !(sourceURL.Scheme == "http" || sourceURL.Scheme == "https") {
 		http.Error(w, "invalid source URL: " + err.Error(), 400)
 		return
 	}
 
-	//sig := params.ByName("signature")
-	//pathToVerify := strings.TrimPrefix(reqPath, "/"+sig+"/")
-	log.Printf("reqPath: %s", reqPath)
 	signature := req.Header.Get("Signature")
-	log.Printf("signature: %s", signature)
-	pathToVerify := strings.TrimPrefix(reqPath, "/")
-	if err := validateSignature(signature, pathToVerify); err != nil {
+
+	if err := validateSignature(signature, reqPath); err != nil {
 		http.Error(w, "invalid signature", 401)
 		return
 	}
 
 	width, height, err := parseWidthAndHeight(params.ByName("size"))
+
 	if err != nil {
 		http.Error(w, "invalid height requested", 400)
 		return
 	}
 
-	//resultPath := normalizePath(strings.TrimPrefix(reqPath, "/"+sig))
 	resultPath := normalizePath(reqPath)
 
 	// TODO(bgentry): everywhere that switches on resultBucket should switch on
@@ -139,15 +136,18 @@ func handleResize(w http.ResponseWriter, req *http.Request, params httprouter.Pa
 
 	// try to get stored result
 	r, h, err := getStoredResult(req.Method, resultPath)
+
 	if err != nil {
 		log.Printf("getting stored result: %s", err)
 		generateThumbnail(w, req.Method, resultPath, sourceURL.String(), width, height)
 		return
 	}
+
 	defer r.Close()
 
 	// return stored result
 	length, err := strconv.Atoi(h.Get("Content-Length"))
+
 	if err != nil {
 		log.Printf("invalid result content-length: %s", err)
 		// TODO: try to generate instead of erroring w/ 500?
@@ -161,10 +161,12 @@ func handleResize(w http.ResponseWriter, req *http.Request, params httprouter.Pa
 		ETag:          strings.Trim(h.Get("Etag"), `"`),
 		Path:          resultPath,
 	})
+
 	if _, err = io.Copy(w, r); err != nil {
 		log.Printf("copying from stored result: %s", err)
 		return
 	}
+
 	if err = r.Close(); err != nil {
 		log.Printf("closing stored result copy: %s", err)
 	}
@@ -187,10 +189,12 @@ func computeHexMD5(data []byte) string {
 func generateThumbnail(w http.ResponseWriter, rmethod, rpath string, sourceURL string, width, height uint) {
 	log.Printf("generating %s", rpath)
 	resp, err := httpClient.Get(sourceURL)
+
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
@@ -200,6 +204,7 @@ func generateThumbnail(w http.ResponseWriter, rmethod, rpath string, sourceURL s
 	}
 
 	img, err := ioutil.ReadAll(resp.Body)
+
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -213,6 +218,7 @@ func generateThumbnail(w http.ResponseWriter, rmethod, rpath string, sourceURL s
 		Gravity:      vips.CENTRE,
 		Quality:      33,
 	})
+
 	if err != nil {
 		responseCode := 500
 		if err.Error() == "unknown image format" {
@@ -229,7 +235,9 @@ func generateThumbnail(w http.ResponseWriter, rmethod, rpath string, sourceURL s
 		ETag:          computeHexMD5(buf),
 		Path:          rpath,
 	}
+
 	setResultHeaders(w, res)
+
 	if rmethod != "HEAD" {
 		if _, err = w.Write(buf); err != nil {
 			log.Printf("writing buffer to response: %s", err)
@@ -249,29 +257,35 @@ func getStoredResult(method, path string) (io.ReadCloser, http.Header, error) {
 
 	s3URL := fmt.Sprintf("https://%s.s3.amazonaws.com%s", resultBucketName, path)
 	req, err := http.NewRequest(method, s3URL, nil)
+
 	if err != nil {
 		return nil, nil, err
 	}
 
 	resultBucket.Sign(req)
 	res, err := httpClient.Do(req)
+
 	if err != nil {
 		return nil, nil, err
 	}
+
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		// TODO: drain res.Body to ioutil.Discard before closing?
 		res.Body.Close()
 		return nil, nil, fmt.Errorf("unexpected status code %d", res.StatusCode)
 	}
+
 	res.Header.Set("Content-Length", strconv.FormatInt(res.ContentLength, 10))
 	return res.Body, res.Header, err
 }
 
 func mustGetenv(name string) string {
 	value := os.Getenv(name)
+
 	if value == "" {
 		log.Fatalf("missing %s env", name)
 	}
+
 	return value
 }
 
@@ -282,20 +296,26 @@ func normalizePath(p string) string {
 
 func parseWidthAndHeight(str string) (width, height uint, err error) {
 	sizeParts := strings.Split(str, "x")
+
 	if len(sizeParts) != 2 {
 		err = fmt.Errorf("invalid size requested")
 		return
 	}
+
 	width64, err := strconv.ParseUint(sizeParts[0], 10, 64)
+
 	if err != nil {
 		err = fmt.Errorf("invalid width requested")
 		return
 	}
+
 	height64, err := strconv.ParseUint(sizeParts[1], 10, 64)
+
 	if err != nil {
 		err = fmt.Errorf("invalid height requested")
 		return
 	}
+
 	return uint(width64), uint(height64), nil
 }
 
@@ -314,19 +334,25 @@ func setResultHeaders(w http.ResponseWriter, result *result) {
 func storeResult(res *result) {
 	h := make(http.Header)
 	h.Set("Content-Type", res.ContentType)
+
 	if useRRS {
 		h.Set("x-amz-storage-class", "REDUCED_REDUNDANCY")
 	}
+
 	w, err := resultBucket.PutWriter(res.Path, h, nil)
+
 	if err != nil {
 		log.Printf("storing result for %s: %s", res.Path, err)
 		return
 	}
+
 	defer w.Close()
+
 	if _, err = w.Write(res.Data); err != nil {
 		log.Printf("storing result for %s: %s", res.Path, err)
 		return
 	}
+
 	if err = w.Close(); err != nil {
 		log.Printf("storing result for %s: %s", res.Path, err)
 	}
@@ -337,20 +363,18 @@ func validateSignature(sig, pathPart string) error {
 		return nil
 	}
 
-	h := hmac.New(sha1.New, securityKey)
-	
+	h := hmac.New(sha256.New, securityKey)
+
 	if _, err := h.Write([]byte(pathPart)); err != nil {
 		return err
 	}
-	
+
 	actualSig := base64.StdEncoding.EncodeToString(h.Sum(nil))
-	log.Printf("actual: %s", actualSig)
-	log.Printf("signature: %s", sig)
-	
+
 	// constant-time string comparison
 	if subtle.ConstantTimeCompare([]byte(sig), []byte(actualSig)) != 1 {
 		return fmt.Errorf("signature mismatch")
 	}
-	
+
 	return nil
 }
