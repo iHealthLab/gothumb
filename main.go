@@ -67,7 +67,7 @@ func main() {
 	}
 
 	router := httprouter.New()
-	router.GET("/gothumb/:size/*source", handleResize)
+	router.GET("/:size/*source", handleResize)
 	log.Fatal(http.ListenAndServe(listenInterface, router))
 }
 
