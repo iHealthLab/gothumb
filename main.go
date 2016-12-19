@@ -3,11 +3,11 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/md5"
-	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"flag"
 	"fmt"
+	"golang.org/x/crypto/sha3"
 	"io"
 	"io/ioutil"
 	"log"
@@ -362,7 +362,7 @@ func validateSignature(sig, pathPart string) error {
 		return nil
 	}
 
-	h := hmac.New(sha256.New, securityKey)
+	h := hmac.New(sha3.New256, securityKey)
 
 	if _, err := h.Write([]byte(pathPart)); err != nil {
 		return err
