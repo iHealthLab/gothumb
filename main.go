@@ -1,180 +1,187 @@
 package main
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/subtle"
 	"encoding/base64"
-	"flag"
 	"fmt"
-	"golang.org/x/crypto/sha3"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/joelchen/gothumb/Godeps/_workspace/src/github.com/DAddYE/vips"
-	"github.com/joelchen/gothumb/Godeps/_workspace/src/github.com/julienschmidt/httprouter"
-	"github.com/joelchen/gothumb/Godeps/_workspace/src/github.com/rlmcpherson/s3gof3r"
+	"github.com/DAddYE/vips"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/julienschmidt/httprouter"
+	"github.com/spf13/viper"
+	"golang.org/x/crypto/sha3"
 )
 
 var (
-	listenInterface  string
-	maxAge           int
-	securityKey      []byte
-	resultBucketName string
-	useRRS           bool
-	unsafeMode       bool
-
-	httpClient   = http.DefaultClient
-	resultBucket *s3gof3r.Bucket
+	port       int
+	bucket     string
+	httpClient = http.DefaultClient
 )
 
-type ByteSize int64
-
+// Size in bytes
 const (
-	_           = iota // ignore first value by assigning to blank identifier
-	KB ByteSize = 1 << (10 * iota)
+	_  = iota
+	KB = 1 << (10 * iota)
 	MB
 )
 
 func main() {
-	log.SetFlags(0) // hide timestamps from Go logs
+	viper.SetConfigName("config")
+	viper.AddConfigPath(".")
+	log.SetFlags(0)
+	err := viper.ReadInConfig()
 
-	parseFlags()
-
-	resultBucketName = os.Getenv("RESULT_STORAGE_BUCKET")
-	if resultBucketName != "" {
-		keys, err := s3gof3r.EnvKeys()
-		if err != nil {
-			log.Fatal(err)
-		}
-		resultBucket = s3gof3r.New(s3gof3r.DefaultDomain, keys).Bucket(resultBucketName)
-		resultBucket.Concurrency = 4
-		resultBucket.PartSize = int64(2 * MB)
-		resultBucket.Md5Check = false
-		httpClient = resultBucket.Client
-
-		if rrs := os.Getenv("USE_RRS"); rrs == "true" || rrs == "1" {
-			useRRS = true
-		}
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		bucket = viper.GetString("s3.bucket")
 	}
 
 	router := httprouter.New()
 	router.GET("/:size/*source", handleResize)
-	log.Fatal(http.ListenAndServe(listenInterface, router))
+	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(viper.GetInt("server.port")), router))
 }
 
-func parseFlags() {
-	securityKeyStr := ""
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8888"
-	}
-
-	if maxAgeStr := os.Getenv("MAX_AGE"); maxAgeStr != "" {
-		var err error
-		if maxAge, err = strconv.Atoi(maxAgeStr); err != nil {
-			log.Fatal("invalid MAX_AGE setting")
-		}
-	}
-
-	flag.StringVar(&listenInterface, "l", ":"+port, "listen address")
-	flag.IntVar(&maxAge, "max-age", maxAge, "the maximum HTTP caching age to use on returned images")
-	flag.StringVar(&securityKeyStr, "k", os.Getenv("SECURITY_KEY"), "security key")
-	flag.BoolVar(&unsafeMode, "unsafe", false, "whether to allow /unsafe URLs")
-
-	flag.Parse()
-
-	if securityKeyStr == "" && !unsafeMode {
-		log.Fatalf("must provide a security key with -k or allow unsafe URLs")
-	}
-	securityKey = []byte(securityKeyStr)
-}
-
-func handleResize(w http.ResponseWriter, req *http.Request, params httprouter.Params) {
-	reqPath := req.URL.EscapedPath()
-	log.Printf("%s %s", req.Method, reqPath)
-	sourceURL, err := url.Parse(strings.TrimPrefix(params.ByName("source"), "/"))
-
-	if err != nil || !(sourceURL.Scheme == "http" || sourceURL.Scheme == "https") {
-		http.Error(w, "invalid source URL: " + err.Error(), 400)
-		return
-	}
-
-	signature := req.Header.Get("Signature")
-
-	if err := validateSignature(signature, reqPath); err != nil {
-		http.Error(w, "invalid signature", 401)
-		return
-	}
-
+func handleResize(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
+	sourcePath := request.URL.EscapedPath()
 	width, height, err := parseWidthAndHeight(params.ByName("size"))
 
 	if err != nil {
-		http.Error(w, "invalid height requested", 400)
+		http.Error(writer, err.Error(), 601)
 		return
 	}
 
-	resultPath := normalizePath(reqPath)
+	signature := request.Header.Get("Signature")
 
-	// TODO(bgentry): everywhere that switches on resultBucket should switch on
-	// something like resultStorage instead.
-	if resultBucket == nil {
-		// no result storage, just generate the thumbnail
-		generateThumbnail(w, req.Method, resultPath, sourceURL.String(), width, height)
+	if err = validateSignature(signature, sourcePath); err != nil {
+		http.Error(writer, err.Error(), 602)
 		return
 	}
 
-	// try to get stored result
-	r, h, err := getStoredResult(req.Method, resultPath)
+	source, err := url.Parse(strings.TrimPrefix(params.ByName("source"), "/"))
 
 	if err != nil {
-		log.Printf("getting stored result: %s", err)
-		generateThumbnail(w, req.Method, resultPath, sourceURL.String(), width, height)
+		http.Error(writer, err.Error(), 603)
 		return
 	}
 
-	defer r.Close()
+	source.Scheme = ""
+	source.Host = ""
+	dir, file := path.Split(source.String())
+	resultPath := strings.Join([]string{"cache/", dir, params.ByName("size"), "/", file}, "")
 
-	// return stored result
-	length, err := strconv.Atoi(h.Get("Content-Length"))
+	if bucket == "" {
+		body, e := getImageFromURL(source.String())
+
+		if e != nil {
+			http.Error(writer, e.Error(), 604)
+			return
+		}
+
+		e = generateThumbnail(writer, body, sourcePath, width, height)
+
+		if e != nil {
+			http.Error(writer, e.Error(), 605)
+			return
+		}
+
+		return
+	}
+
+	config := &aws.Config{
+		Region: aws.String(viper.GetString("s3.region")),
+		Credentials: credentials.NewStaticCredentials(
+			viper.GetString("s3.access-key-id"),
+			viper.GetString("s3.secret-access-key"),
+			"",
+		),
+	}
+
+	sess, err := session.NewSession(config)
 
 	if err != nil {
-		log.Printf("invalid result content-length: %s", err)
-		// TODO: try to generate instead of erroring w/ 500?
-		http.Error(w, err.Error(), 500)
+		http.Error(writer, err.Error(), 606)
 		return
 	}
 
-	setResultHeaders(w, &result{
-		ContentType:   h.Get("Content-Type"),
-		ContentLength: length,
-		ETag:          strings.Trim(h.Get("Etag"), `"`),
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(resultPath),
+	}
+
+	svc := s3.New(sess)
+	output, err := svc.GetObject(input)
+
+	if err != nil {
+		source, err := url.Parse(strings.TrimPrefix(params.ByName("source"), "/"))
+
+		if err != nil {
+			http.Error(writer, err.Error(), 607)
+			return
+		}
+
+		if source.Host == "" {
+			input := &s3.GetObjectInput{
+				Bucket: aws.String(bucket),
+				Key:    aws.String(params.ByName("source")),
+			}
+
+			output, err = svc.GetObject(input)
+
+			if err != nil {
+				http.Error(writer, err.Error(), 608)
+				return
+			}
+
+			err = generateThumbnail(writer, output.Body, resultPath, width, height)
+
+			if err != nil {
+				http.Error(writer, err.Error(), 609)
+				return
+			}
+		} else {
+			body, err := getImageFromURL(source.String())
+
+			if err != nil {
+				http.Error(writer, err.Error(), 610)
+			}
+
+			generateThumbnail(writer, body, resultPath, width, height)
+			return
+		}
+	}
+
+	setResultHeaders(writer, &result{
+		ContentType:   *output.ContentType,
+		ContentLength: *output.ContentLength,
+		ETag:          *output.ETag,
 		Path:          resultPath,
 	})
 
-	if _, err = io.Copy(w, r); err != nil {
-		log.Printf("copying from stored result: %s", err)
+	if _, err := io.Copy(writer, output.Body); err != nil {
+		http.Error(writer, err.Error(), 611)
 		return
-	}
-
-	if err = r.Close(); err != nil {
-		log.Printf("closing stored result copy: %s", err)
 	}
 }
 
 type result struct {
 	Data          []byte
 	ContentType   string
-	ContentLength int
+	ContentLength int64
 	ETag          string
 	Path          string
 }
@@ -185,184 +192,147 @@ func computeHexMD5(data []byte) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-func generateThumbnail(w http.ResponseWriter, rmethod, rpath string, sourceURL string, width, height uint) {
-	log.Printf("generating %s", rpath)
-	resp, err := httpClient.Get(sourceURL)
+func generateThumbnail(writer http.ResponseWriter, body io.ReadCloser, path string, width, height int) error {
+	img, err := ioutil.ReadAll(body)
+	body.Close()
 
 	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		log.Printf("unexpected status code from source: %d", resp.StatusCode)
-		http.Error(w, "", resp.StatusCode)
-		return
-	}
-
-	img, err := ioutil.ReadAll(resp.Body)
-
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
+		return err
 	}
 
 	buf, err := vips.Resize(img, vips.Options{
-		Height:       int(height),
-		Width:        int(width),
-		Crop:         false,
+		Height:       height,
+		Width:        width,
+		Crop:         viper.GetBool("vips.crop"),
 		Interpolator: vips.BICUBIC,
 		Gravity:      vips.CENTRE,
-		Quality:      33,
+		Quality:      viper.GetInt("vips.quality"),
 	})
 
 	if err != nil {
-		responseCode := 500
-		if err.Error() == "unknown image format" {
-			responseCode = 400
-		}
-		http.Error(w, fmt.Sprintf("resizing image: %s", err.Error()), responseCode)
-		return
+		return err
 	}
 
-	res := &result{
-		ContentType:   "image/jpeg", // TODO: support PNGs as well
-		ContentLength: len(buf),
-		Data:          buf, // TODO: check if I need to copy this
+	var contentType string
+
+	switch {
+	case bytes.Equal(buf[:2], vips.MARKER_JPEG):
+		contentType = "image/jpeg"
+	case bytes.Equal(buf[:2], vips.MARKER_PNG):
+		contentType = "image/png"
+	default:
+		return fmt.Errorf("Unknown image format")
+	}
+
+	result := &result{
+		ContentType:   contentType,
+		ContentLength: int64(len(buf)),
+		Data:          buf,
 		ETag:          computeHexMD5(buf),
-		Path:          rpath,
+		Path:          path,
 	}
 
-	setResultHeaders(w, res)
+	setResultHeaders(writer, result)
 
-	if rmethod != "HEAD" {
-		if _, err = w.Write(buf); err != nil {
-			log.Printf("writing buffer to response: %s", err)
+	if _, err = writer.Write(buf); err != nil {
+		return err
+	}
+
+	if bucket != "" {
+		go storeResult(result)
+	}
+
+	return nil
+}
+
+func getImageFromURL(URL string) (io.ReadCloser, error) {
+	response, err := httpClient.Get(URL)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if response.StatusCode != 200 {
+		return nil, fmt.Errorf("Unexpected status code from source: %d", response.StatusCode)
+	}
+
+	return response.Body, nil
+}
+
+func parseWidthAndHeight(str string) (width, height int, err error) {
+	if value, ok := viper.GetStringMapString("sizes")[str]; ok {
+		sizeParts := strings.Split(value, "x")
+
+		if len(sizeParts) != 2 {
+			return 0, 0, fmt.Errorf("Invalid size requested")
 		}
+
+		width, err = strconv.Atoi(sizeParts[0])
+
+		if err != nil {
+			return 0, 0, err
+		}
+
+		height, err = strconv.Atoi(sizeParts[1])
+
+		if err != nil {
+			return 0, 0, err
+		}
+
+		return width, height, nil
 	}
 
-	if resultBucket != nil {
-		go storeResult(res)
-	}
-}
-
-// caller is responsible for closing the returned ReadCloser
-func getStoredResult(method, path string) (io.ReadCloser, http.Header, error) {
-	if method != "HEAD" {
-		return resultBucket.GetReader(path, nil)
-	}
-
-	s3URL := fmt.Sprintf("https://%s.s3.amazonaws.com%s", resultBucketName, path)
-	req, err := http.NewRequest(method, s3URL, nil)
-
-	if err != nil {
-		return nil, nil, err
-	}
-
-	resultBucket.Sign(req)
-	res, err := httpClient.Do(req)
-
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		// TODO: drain res.Body to ioutil.Discard before closing?
-		res.Body.Close()
-		return nil, nil, fmt.Errorf("unexpected status code %d", res.StatusCode)
-	}
-
-	res.Header.Set("Content-Length", strconv.FormatInt(res.ContentLength, 10))
-	return res.Body, res.Header, err
-}
-
-func mustGetenv(name string) string {
-	value := os.Getenv(name)
-
-	if value == "" {
-		log.Fatalf("missing %s env", name)
-	}
-
-	return value
-}
-
-func normalizePath(p string) string {
-	// TODO(bgentry): Support for custom root path? ala RESULT_STORAGE_AWS_STORAGE_ROOT_PATH
-	return path.Clean(p)
-}
-
-func parseWidthAndHeight(str string) (width, height uint, err error) {
-	sizeParts := strings.Split(str, "x")
-
-	if len(sizeParts) != 2 {
-		err = fmt.Errorf("invalid size requested")
-		return
-	}
-
-	width64, err := strconv.ParseUint(sizeParts[0], 10, 64)
-
-	if err != nil {
-		err = fmt.Errorf("invalid width requested")
-		return
-	}
-
-	height64, err := strconv.ParseUint(sizeParts[1], 10, 64)
-
-	if err != nil {
-		err = fmt.Errorf("invalid height requested")
-		return
-	}
-
-	return uint(width64), uint(height64), nil
+	err = fmt.Errorf("Invalid size requested")
+	return
 }
 
 func setCacheHeaders(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", fmt.Sprintf("max-age=%d,public", maxAge))
-	w.Header().Set("Expires", time.Now().UTC().Add(time.Duration(maxAge)*time.Second).Format(http.TimeFormat))
+	w.Header().Set("Cache-Control", fmt.Sprintf("max-age=%d,public", viper.GetInt("cache-control.max-age")))
 }
 
 func setResultHeaders(w http.ResponseWriter, result *result) {
 	w.Header().Set("Content-Type", result.ContentType)
-	w.Header().Set("Content-Length", strconv.Itoa(result.ContentLength))
+	w.Header().Set("Content-Length", strconv.FormatInt(result.ContentLength, 10))
 	w.Header().Set("ETag", `"`+result.ETag+`"`)
 	setCacheHeaders(w)
 }
 
-func storeResult(res *result) {
-	h := make(http.Header)
-	h.Set("Content-Type", res.ContentType)
-
-	if useRRS {
-		h.Set("x-amz-storage-class", "REDUCED_REDUNDANCY")
+func storeResult(result *result) {
+	config := &aws.Config{
+		Region: aws.String(viper.GetString("s3.region")),
+		Credentials: credentials.NewStaticCredentials(
+			viper.GetString("s3.access-key-id"),
+			viper.GetString("s3.secret-access-key"),
+			"",
+		),
 	}
 
-	w, err := resultBucket.PutWriter(res.Path, h, nil)
+	session, err := session.NewSession(config)
 
 	if err != nil {
-		log.Printf("storing result for %s: %s", res.Path, err)
-		return
+		log.Fatal(err)
 	}
 
-	defer w.Close()
+	svc := s3.New(session)
 
-	if _, err = w.Write(res.Data); err != nil {
-		log.Printf("storing result for %s: %s", res.Path, err)
-		return
+	params := &s3.PutObjectInput{
+		Bucket:        aws.String(bucket),
+		Key:           aws.String(result.Path),
+		Body:          bytes.NewReader(result.Data),
+		ContentLength: aws.Int64(result.ContentLength),
+		ContentType:   aws.String(result.ContentType),
+		StorageClass:  aws.String(s3.StorageClassReducedRedundancy),
 	}
 
-	if err = w.Close(); err != nil {
-		log.Printf("storing result for %s: %s", res.Path, err)
+	_, err = svc.PutObject(params)
+
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 
 func validateSignature(sig, pathPart string) error {
-	if unsafeMode && sig == "unsafe" {
-		return nil
-	}
-
-	h := hmac.New(sha3.New256, securityKey)
+	h := hmac.New(sha3.New256, []byte(viper.GetString("server.key")))
 
 	if _, err := h.Write([]byte(pathPart)); err != nil {
 		return err
@@ -370,9 +340,8 @@ func validateSignature(sig, pathPart string) error {
 
 	actualSig := base64.StdEncoding.EncodeToString(h.Sum(nil))
 
-	// constant-time string comparison
 	if subtle.ConstantTimeCompare([]byte(sig), []byte(actualSig)) != 1 {
-		return fmt.Errorf("signature mismatch")
+		return fmt.Errorf("Signature mismatch")
 	}
 
 	return nil
