@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/hmac"
 	"crypto/md5"
@@ -15,12 +16,14 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/DAddYE/vips"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/sha3"
@@ -52,8 +55,89 @@ func main() {
 	}
 
 	router := httprouter.New()
-	router.GET("/:size/*source", handleResize)
+	router.GET("/v1/file/:filename", getFile)
+	router.POST("/upload", handleUpload)
+	router.GET("/v1/resize/:size/*source", handleResize)
 	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(viper.GetInt("server.port")), router))
+}
+
+func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+	fmt.Println(params)
+	config := &aws.Config{
+		Region: aws.String(viper.GetString("s3.region")),
+		Credentials: credentials.NewStaticCredentials(
+			viper.GetString("s3.access-key-id"),
+			viper.GetString("s3.secret-access-key"),
+			"",
+		),
+	}
+	sess, err := session.NewSession(config)
+
+	if err != nil {
+		http.Error(w, err.Error(), 606)
+		return
+	}
+
+	svc := s3.New(sess)
+	bucket := viper.GetString("s3.bucket")
+	var key = new(string)
+	*key = "files/" + strings.Replace(params.ByName("filename"), " ", "_", -1)
+	req, _ := svc.GetObjectRequest(&s3.GetObjectInput{
+		Bucket: &bucket,
+		Key:    key,
+	})
+	urlStr, err := req.Presign(15 * time.Minute)
+
+	if err != nil {
+		log.Println("Failed to sign request", err)
+	}
+
+	log.Println("The URL is", urlStr)
+}
+
+func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+	fmt.Println("method:", r.Method)
+	r.ParseMultipartForm(32 << 20)
+	file, handler, err := r.FormFile("uploadfile")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer file.Close()
+	fileSize, err := file.Seek(0, 2)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("File size : ", fileSize)
+	bytes := make([]byte, fileSize)
+	buffer := bufio.NewReader(file)
+	_, err = buffer.Read(bytes)
+	config := &aws.Config{
+		Region: aws.String(viper.GetString("s3.region")),
+		Credentials: credentials.NewStaticCredentials(
+			viper.GetString("s3.access-key-id"),
+			viper.GetString("s3.secret-access-key"),
+			"",
+		),
+	}
+
+	sess, err := session.NewSession(config)
+	uploader := s3manager.NewUploader(sess)
+
+	// Perform an upload.
+	bucket := viper.GetString("s3.bucket")
+	var key = new(string)
+	*key = "files/" + strings.Replace(handler.Filename, " ", "_", -1)
+	result, err := uploader.Upload(&s3manager.UploadInput{
+		Bucket: &bucket,
+		Key:    key,
+		Body:   file,
+	})
+	if err != nil {
+		log.Fatalln(err)
+	}
+	log.Println(result)
 }
 
 func handleResize(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
