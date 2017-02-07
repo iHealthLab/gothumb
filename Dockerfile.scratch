@@ -1,0 +1,5 @@
+FROM felixbuenemann/vips-alpine
+ADD App /
+COPY config.toml /
+EXPOSE 8888
+ENTRYPOINT ["/App"]

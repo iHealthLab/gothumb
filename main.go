@@ -7,6 +7,7 @@ import (
 	"crypto/md5"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -55,9 +56,9 @@ func main() {
 	}
 
 	router := httprouter.New()
-	router.GET("/v1/file/:filename", getFile)
+	router.GET("/file/:filename", getFile)
 	router.POST("/upload", handleUpload)
-	router.GET("/v1/resize/:size/*source", handleResize)
+	router.GET("/resize/:size/*source", handleResize)
 	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(viper.GetInt("server.port")), router))
 }
 
@@ -93,6 +94,7 @@ func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	}
 
 	log.Println("The URL is", urlStr)
+	w.Write([]byte(urlStr))
 }
 
 func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
@@ -100,14 +102,15 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	r.ParseMultipartForm(32 << 20)
 	file, handler, err := r.FormFile("uploadfile")
 	if err != nil {
-		fmt.Println(err)
+		w.Write([]byte(err.Error()))
 		return
 	}
 
 	defer file.Close()
 	fileSize, err := file.Seek(0, 2)
 	if err != nil {
-		panic(err)
+		w.Write([]byte(err.Error()))
+		return
 	}
 	fmt.Println("File size : ", fileSize)
 	bytes := make([]byte, fileSize)
@@ -128,16 +131,22 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	// Perform an upload.
 	bucket := viper.GetString("s3.bucket")
 	var key = new(string)
-	*key = "files/" + strings.Replace(handler.Filename, " ", "_", -1)
+	h := md5.New()
+	fileNoSpace := strings.Replace(handler.Filename, " ", "_", -1)
+	io.WriteString(h, fileNoSpace)
+	io.WriteString(h, time.Now().String())
+	s := hex.EncodeToString(h.Sum(nil))
+	*key = "files/" + s + "-" + fileNoSpace
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: &bucket,
 		Key:    key,
 		Body:   file,
 	})
 	if err != nil {
-		log.Fatalln(err)
+		w.Write([]byte(err.Error()))
+		return
 	}
-	log.Println(result)
+	w.Write([]byte(result.Location))
 }
 
 func handleResize(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
