@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/hmac"
 	"crypto/md5"
@@ -101,7 +100,7 @@ func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	fmt.Println("method:", r.Method)
 	r.ParseMultipartForm(32 << 20)
-	file, handler, err := r.FormFile("uploadfile")
+	file, header, err := r.FormFile("uploadfile")
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
@@ -131,25 +130,17 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	bucket := viper.GetString("s3.bucket")
 	var key = new(string)
 	h := md5.New()
-	fileNoSpace := strings.Replace(handler.Filename, " ", "_", -1)
+	fileNoSpace := strings.Replace(header.Filename, " ", "_", -1)
 	io.WriteString(h, fileNoSpace)
 	io.WriteString(h, time.Now().String())
 	s := hex.EncodeToString(h.Sum(nil))
 	*key = "files/" + s + "-" + fileNoSpace
-	bytes := make([]byte, fileSize)
-	buffer := bufio.NewReader(file)
-	_, err = buffer.Read(bytes)
-	kind, err := filetype.Match(bytes)
-	if err != nil {
-		log.Println("Unknown type", err)
-		return
-	}
-	fmt.Println("File type: ", kind.MIME.Value)
+	fmt.Println("File type: ", header.Header.Get("Content-Type"))
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: &bucket,
 		Key:    key,
 		Body:   file,
-		ContentType: aws.String(kind.MIME.Value),
+		ContentType: header.Header.Get("Content-Type"),
 	})
 	if err != nil {
 		w.Write([]byte(err.Error()))
