@@ -27,7 +27,6 @@ import (
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/sha3"
-	"gopkg.in/h2non/filetype.v1"
 )
 
 var (
@@ -138,9 +137,9 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	fmt.Println("File type: ", header.Header.Get("Content-Type"))
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: &bucket,
-		Key:    key,
-		Body:   file,
-		ContentType: header.Header.Get("Content-Type"),
+		Key: key,
+		Body: file,
+		ContentType: &header.Header.Get("Content-Type"),
 	})
 	if err != nil {
 		w.Write([]byte(err.Error()))
