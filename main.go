@@ -137,7 +137,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	io.WriteString(h, time.Now().String())
 	s := hex.EncodeToString(h.Sum(nil))
 	*key = "files/" + s + "-" + fileNoSpace
-	fileType := http.DetectContentType(buffer)
+	fileType := http.DetectContentType(bytes)
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: &bucket,
 		Key:    key,
