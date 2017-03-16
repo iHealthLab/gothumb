@@ -114,8 +114,8 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	}
 	fmt.Println("File size: ", fileSize)
 	bytes := make([]byte, fileSize)
- -	buffer := bufio.NewReader(file)
- -	_, err = buffer.Read(bytes)
+	buffer := bufio.NewReader(file)
+	_, err = buffer.Read(bytes)
 	
 	config := &aws.Config{
 		Region: aws.String(viper.GetString("s3.region")),
