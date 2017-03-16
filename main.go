@@ -140,10 +140,10 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	*key = "files/" + s + "-" + fileNoSpace
 	kind, err := filetype.Match(bytes)
 	if err != nil {
-		fmt.Printf("Error: %s", err)
+		log.Println("Unknown type", err)
 		return
 	}
-	fmt.Printf("File type: %s. MIME: %s\n", kind.Extension, kind.MIME.Value)
+	fmt.Println("File type: ", kind.MIME.Value)
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: &bucket,
 		Key:    key,
