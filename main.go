@@ -112,7 +112,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		w.Write([]byte(err.Error()))
 		return
 	}
-	fmt.Println("File size : ", fileSize)
+	fmt.Println("File size: ", fileSize)
 	bytes := make([]byte, fileSize)
 	buffer := bufio.NewReader(file)
 	_, err = buffer.Read(bytes)
@@ -138,6 +138,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	s := hex.EncodeToString(h.Sum(nil))
 	*key = "files/" + s + "-" + fileNoSpace
 	fileType := http.DetectContentType(bytes)
+	fmt.Println("File type: ", fileType)
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: &bucket,
 		Key:    key,
