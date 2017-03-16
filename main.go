@@ -113,6 +113,9 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		return
 	}
 	fmt.Println("File size: ", fileSize)
+	bytes := make([]byte, fileSize)
+ -	buffer := bufio.NewReader(file)
+ -	_, err = buffer.Read(bytes)
 	
 	config := &aws.Config{
 		Region: aws.String(viper.GetString("s3.region")),
@@ -135,8 +138,8 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	io.WriteString(h, time.Now().String())
 	s := hex.EncodeToString(h.Sum(nil))
 	*key = "files/" + s + "-" + fileNoSpace
-	buffer, _ := ioutil.ReadAll(file)
-	kind, err := filetype.Match(buffer)
+	buf, _ := ioutil.ReadAll(file)
+	kind, err := filetype.Match(buf)
 	if err != nil {
 		log.Println("Unknown type", err)
 		return
