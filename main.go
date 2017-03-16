@@ -138,7 +138,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	io.WriteString(h, time.Now().String())
 	s := hex.EncodeToString(h.Sum(nil))
 	*key = "files/" + s + "-" + fileNoSpace
-	kind, err := filetype.Match(buf)
+	kind, err := filetype.Match(buffer)
 	if err != nil {
 		fmt.Printf("Error: %s", err)
 		return
