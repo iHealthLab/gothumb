@@ -142,7 +142,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		Bucket: &bucket,
 		Key:    key,
 		Body:   file,
-		ContentType: aws.String(fileType)
+		ContentType: aws.String(fileType),
 	})
 	if err != nil {
 		w.Write([]byte(err.Error()))
