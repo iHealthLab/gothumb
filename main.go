@@ -7,13 +7,16 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -104,19 +107,19 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		w.Write([]byte(err.Error()))
 		return
 	}
-	
+
 	_, data, err := getParts(string(body))
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
-	
+
 	bytes, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
-	
+
 	fmt.Println("File size: ", len(bytes))
 	file, err := ioutil.TempFile("", r.Header.Get("File-Name"))
 	defer os.Remove(file.Name())
@@ -128,7 +131,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		w.Write([]byte(err.Error()))
 		return
 	}
-	
+
 	config := &aws.Config{
 		Region: aws.String(viper.GetString("s3.region")),
 		Credentials: credentials.NewStaticCredentials(
@@ -153,9 +156,9 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	contentType := header.Header.Get("Content-Type")
 	fmt.Println("File type: ", contentType)
 	result, err := uploader.Upload(&s3manager.UploadInput{
-		Bucket: &bucket,
-		Key: key,
-		Body: file,
+		Bucket:      &bucket,
+		Key:         key,
+		Body:        file,
 		ContentType: &contentType,
 	})
 	if err != nil {
