@@ -127,10 +127,6 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		w.Write([]byte(err.Error()))
 		return
 	}
-	if err := file.Close(); err != nil {
-		w.Write([]byte(err.Error()))
-		return
-	}
 
 	config := &aws.Config{
 		Region: aws.String(viper.GetString("s3.region")),
@@ -165,6 +161,11 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		return
 	}
 	w.Write([]byte(result.Location))
+	
+	if err := file.Close(); err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
 }
 
 func handleResize(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
