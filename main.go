@@ -108,7 +108,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		return
 	}
 
-	_, data, err := getParts(string(body))
+	contentType, data, err := getParts(string(body))
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
@@ -148,12 +148,11 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	bucket := viper.GetString("s3.bucket")
 	var key = new(string)
 	h := md5.New()
-	fileNoSpace := strings.Replace(header.Filename, " ", "_", -1)
+	fileNoSpace := strings.Replace(file.Name(), " ", "_", -1)
 	io.WriteString(h, fileNoSpace)
 	io.WriteString(h, time.Now().String())
 	s := hex.EncodeToString(h.Sum(nil))
 	*key = "files/" + s + "-" + fileNoSpace
-	contentType := header.Header.Get("Content-Type")
 	fmt.Println("File type: ", contentType)
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket:      &bucket,
