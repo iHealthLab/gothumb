@@ -98,13 +98,6 @@ func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 
 func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	fmt.Println("method:", r.Method)
-	_, data, err := getParts(r.Body)
-	
-	if err != nil {
-		w.Write([]byte(err.Error()))
-		return
-	}
-	
 	body, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -112,7 +105,13 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		return
 	}
 	
-	bytes, err := base64.StdEncoding.DecodeString(body)
+	_, data, err := getParts(body)
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	
+	bytes, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
