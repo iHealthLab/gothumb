@@ -98,20 +98,30 @@ func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 
 func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	fmt.Println("method:", r.Method)
-	r.ParseMultipartForm(32 << 20)
-	file, header, err := r.FormFile("uploadfile")
+	_, data, err := getParts(r.Body)
+	
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
-
-	defer file.Close()
-	fileSize, err := file.Seek(0, 2)
+	
+	bytes, err := base64.StdEncoding.DecodeString(r.Body)
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
-	fmt.Println("File size: ", fileSize)
+	
+	fmt.Println("File size: ", len(bytes))
+	file, err := ioutil.TempFile("", r.Header.Get("File-Name"))
+	defer os.Remove(file.Name())
+	if _, err := file.Write(bytes); err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	if err := file.Close(); err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
 	
 	config := &aws.Config{
 		Region: aws.String(viper.GetString("s3.region")),
@@ -438,4 +448,15 @@ func validateSignature(sig, pathPart string) error {
 	}
 
 	return nil
+}
+
+func getParts(s string) (type string, data string, error) {
+	re := regexp.MustCompile("data:(.*);base64,(.*)")
+	parts := re.FindStringSubmatch(s)
+
+	if len(parts) < 3 {
+		return "", "", errors.New("Invalid Base64 input")
+	}
+
+	return parts[1], parts[2], nil
 }
