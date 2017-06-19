@@ -105,7 +105,14 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		return
 	}
 	
-	bytes, err := base64.StdEncoding.DecodeString(r.Body)
+	body, err := ioutil.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	
+	bytes, err := base64.StdEncoding.DecodeString(body)
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
