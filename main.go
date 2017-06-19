@@ -450,7 +450,7 @@ func validateSignature(sig, pathPart string) error {
 	return nil
 }
 
-func getParts(s string) (type string, data string, error) {
+func getParts(s string) (mime string, data string, error) {
 	re := regexp.MustCompile("data:(.*);base64,(.*)")
 	parts := re.FindStringSubmatch(s)
 
