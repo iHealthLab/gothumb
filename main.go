@@ -105,7 +105,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		return
 	}
 	
-	_, data, err := getParts(body)
+	_, data, err := getParts(string(body))
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
