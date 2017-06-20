@@ -60,6 +60,7 @@ func main() {
 	router := httprouter.New()
 	router.GET("/file/:filename", getFile)
 	router.POST("/upload", handleUpload)
+	router.POST("/uploadBase64", handleUploadBase64)
 	router.GET("/resize/:size/*source", handleResize)
 	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(viper.GetInt("server.port")), router))
 }
@@ -101,6 +102,59 @@ func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 
 func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	fmt.Println("method:", r.Method)
+	r.ParseMultipartForm(32 << 20)
+	file, header, err := r.FormFile("uploadfile")
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	defer file.Close()
+	fileSize, err := file.Seek(0, 2)
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	fmt.Println("File size: ", fileSize)
+	
+	config := &aws.Config{
+		Region: aws.String(viper.GetString("s3.region")),
+		Credentials: credentials.NewStaticCredentials(
+			viper.GetString("s3.access-key-id"),
+			viper.GetString("s3.secret-access-key"),
+			"",
+		),
+	}
+
+	sess, err := session.NewSession(config)
+	uploader := s3manager.NewUploader(sess)
+
+	// Perform an upload.
+	bucket := viper.GetString("s3.bucket")
+	var key = new(string)
+	h := md5.New()
+	fileNoSpace := strings.Replace(header.Filename, " ", "_", -1)
+	io.WriteString(h, fileNoSpace)
+	io.WriteString(h, time.Now().String())
+	s := hex.EncodeToString(h.Sum(nil))
+	*key = "files/" + s + "-" + fileNoSpace
+	contentType := header.Header.Get("Content-Type")
+	fmt.Println("File type: ", contentType)
+	result, err := uploader.Upload(&s3manager.UploadInput{
+		Bucket: &bucket,
+		Key: key,
+		Body: file,
+		ContentType: &contentType,
+	})
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	w.Write([]byte(result.Location))
+}
+
+func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+	fmt.Println("method:", r.Method)
 	body, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -108,14 +162,12 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		return
 	}
 
-	contentType, data, err := getParts(string(body))
-	if err != nil {
+	if contentType, data, err := getParts(string(body)); err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
 
-	bytes, err := base64.StdEncoding.DecodeString(data)
-	if err != nil {
+	if bytes, err := base64.StdEncoding.DecodeString(data); err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
@@ -124,6 +176,11 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	file, err := ioutil.TempFile("", r.Header.Get("File-Name"))
 	defer os.Remove(file.Name())
 	if _, err := file.Write(bytes); err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	
+	if fileInfo, err := file.Stat(); err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
@@ -144,7 +201,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	bucket := viper.GetString("s3.bucket")
 	var key = new(string)
 	h := md5.New()
-	fileNoSpace := strings.Replace(file.Name(), " ", "_", -1)
+	fileNoSpace := strings.Replace(fileInfo.Name(), " ", "_", -1)
 	io.WriteString(h, fileNoSpace)
 	io.WriteString(h, time.Now().String())
 	s := hex.EncodeToString(h.Sum(nil))
