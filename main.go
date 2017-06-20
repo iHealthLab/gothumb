@@ -175,9 +175,22 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 	}
 
 	fmt.Println("File size: ", len(bytes))
-	file, err := ioutil.TempFile("", r.Header.Get("File-Name"))
-	defer os.Remove(file.Name())
-	if _, err := file.Write(bytes); err != nil {
+	dir, err := ioutil.TempDir("", "")
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	defer os.RemoveAll(dir)
+
+	tmpfn := filepath.Join(dir, r.Header.Get("File-Name"))
+	if err := ioutil.WriteFile(tmpfn, content, 0666); err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	file, err := os.Open(tmpfn)
+	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
