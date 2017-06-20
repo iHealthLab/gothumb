@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -116,7 +117,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		return
 	}
 	fmt.Println("File size: ", fileSize)
-	
+
 	config := &aws.Config{
 		Region: aws.String(viper.GetString("s3.region")),
 		Credentials: credentials.NewStaticCredentials(
@@ -141,9 +142,9 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	contentType := header.Header.Get("Content-Type")
 	fmt.Println("File type: ", contentType)
 	result, err := uploader.Upload(&s3manager.UploadInput{
-		Bucket: &bucket,
-		Key: key,
-		Body: file,
+		Bucket:      &bucket,
+		Key:         key,
+		Body:        file,
 		ContentType: &contentType,
 	})
 	if err != nil {
@@ -184,7 +185,7 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 	defer os.RemoveAll(dir)
 
 	tmpfn := filepath.Join(dir, r.Header.Get("File-Name"))
-	if err := ioutil.WriteFile(tmpfn, content, 0666); err != nil {
+	if err := ioutil.WriteFile(tmpfn, bytes, 0666); err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
@@ -234,7 +235,7 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 		return
 	}
 	w.Write([]byte(result.Location))
-	
+
 	if err := file.Close(); err != nil {
 		w.Write([]byte(err.Error()))
 		return
