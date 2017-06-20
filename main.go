@@ -162,12 +162,14 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 		return
 	}
 
-	if contentType, data, err := getParts(string(body)); err != nil {
+	contentType, data, err := getParts(string(body))
+	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
 
-	if bytes, err := base64.StdEncoding.DecodeString(data); err != nil {
+	bytes, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
@@ -179,8 +181,9 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 		w.Write([]byte(err.Error()))
 		return
 	}
-	
-	if fileInfo, err := file.Stat(); err != nil {
+
+	fileInfo, err := file.Stat()
+	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
