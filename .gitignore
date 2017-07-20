@@ -31,3 +31,6 @@ vendor/
 
 # config file
 *.toml
+
+# local build
+build-local.sh

@@ -63,11 +63,26 @@ func main() {
 	router.POST("/upload", handleUpload)
 	router.POST("/uploadBase64", handleUploadBase64)
 	router.GET("/resize/:size/*source", handleResize)
+
+	// serve files
+	router.ServeFiles("/static/*filepath", http.Dir("/tmp/"))
+
 	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(viper.GetInt("server.port")), router))
 }
 
 func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	fmt.Println(params)
+
+	// viv
+	local := r.Header.Get("GoThumb-File-Location")
+	if local == "local" {
+		localUrl := viper.GetString("server.static") + params.ByName("filename")
+		fmt.Println("The local URL is", localUrl)
+		w.Write([]byte(localUrl))
+		return
+	}
+	// viv
+
 	config := &aws.Config{
 		Region: aws.String(viper.GetString("s3.region")),
 		Credentials: credentials.NewStaticCredentials(
@@ -182,6 +197,39 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 		return
 	}
 
+	// viv
+	local := r.Header.Get("GoThumb-File-Location")
+	if local == "local" {
+		// tmpfn := filepath.Join(dir, r.Header.Get("File-Name"))
+		fileNoSpace := strings.Replace(r.Header.Get("File-Name"), " ", "_", -1)
+		localFilePath := filepath.Join("/tmp/", r.Header.Get("File-Name"))
+		if err := ioutil.WriteFile(localFilePath, bytes, 0666); err != nil {
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		// viv
+		fmt.Println("localFilePath: ", localFilePath)
+
+		file, err := os.Open(localFilePath)
+		if err != nil {
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		filePath := filepath.Join("/files/", fileNoSpace)
+		fmt.Println("remote filePath: ", filePath)
+		w.Write([]byte(filePath))
+
+		if err := file.Close(); err != nil {
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		return
+	}
+	// viv
+
 	defer os.RemoveAll(dir)
 
 	tmpfn := filepath.Join(dir, r.Header.Get("File-Name"))
@@ -234,9 +282,10 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 		w.Write([]byte(err.Error()))
 		return
 	}
+
 	w.Write([]byte(result.Location))
 
-	if err := file.Close(); err != nil {
+  if err := file.Close(); err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
