@@ -14,3 +14,11 @@ A very fast [golang](http://golang.org/) port of [thumbor](https://github.com/th
 - [ ] Other storage engines
 - [ ] Tests
 - [x] Unsafe mode
+
+
+- [x] Option to save file local (added by @totorokk 07/21/2017, see config below &#11015;)
+```
+[server]
+static = "http://localhost:3001/gothumb/static/"
+local = true
+```

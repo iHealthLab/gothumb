@@ -14,7 +14,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -32,6 +31,9 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/sha3"
 )
+/*
+"os"
+*/
 
 var (
 	port       int
@@ -70,19 +72,20 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(viper.GetInt("server.port")), router))
 }
 
+/* -----------------------   download  ----------------------- */
 func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+	fmt.Println("getFile")
 	fmt.Println(params)
 
-	// viv
-	local := r.Header.Get("GoThumb-File-Location")
-	if local == "local" {
+	// local
+	if viper.GetBool("server.local") == true {
 		localUrl := viper.GetString("server.static") + params.ByName("filename")
 		fmt.Println("The local URL is", localUrl)
 		w.Write([]byte(localUrl))
 		return
 	}
-	// viv
 
+	// s3
 	config := &aws.Config{
 		Region: aws.String(viper.GetString("s3.region")),
 		Credentials: credentials.NewStaticCredentials(
@@ -116,8 +119,10 @@ func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	w.Write([]byte(urlStr))
 }
 
+
+/* -----------------------   upload  ----------------------- */
 func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
-	fmt.Println("method:", r.Method)
+	fmt.Println("handleUpload method:", r.Method)
 	r.ParseMultipartForm(32 << 20)
 	file, header, err := r.FormFile("uploadfile")
 	if err != nil {
@@ -126,6 +131,27 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	}
 
 	defer file.Close()
+
+	contentType := header.Header.Get("Content-Type")
+	fname := strings.Replace(header.Filename, " ", "_", -1)
+
+	var fURL string
+	if viper.GetBool("server.local") == true {
+		// local
+		bytes, err := ioutil.ReadAll(file)
+		if err != nil {
+			fmt.Println("error reading file", err)
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		fURL, err = saveToLocalFS(bytes, fname, contentType)
+
+	} else {
+		// upload
+		fURL, err = uploadToS3(file, fname, contentType)
+	}
+
 	fileSize, err := file.Seek(0, 2)
 	if err != nil {
 		w.Write([]byte(err.Error()))
@@ -133,44 +159,19 @@ func handleUpload(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	}
 	fmt.Println("File size: ", fileSize)
 
-	config := &aws.Config{
-		Region: aws.String(viper.GetString("s3.region")),
-		Credentials: credentials.NewStaticCredentials(
-			viper.GetString("s3.access-key-id"),
-			viper.GetString("s3.secret-access-key"),
-			"",
-		),
-	}
-
-	sess, err := session.NewSession(config)
-	uploader := s3manager.NewUploader(sess)
-
-	// Perform an upload.
-	bucket := viper.GetString("s3.bucket")
-	var key = new(string)
-	h := md5.New()
-	fileNoSpace := strings.Replace(header.Filename, " ", "_", -1)
-	io.WriteString(h, fileNoSpace)
-	io.WriteString(h, time.Now().String())
-	s := hex.EncodeToString(h.Sum(nil))
-	*key = "files/" + s + "-" + fileNoSpace
-	contentType := header.Header.Get("Content-Type")
-	fmt.Println("File type: ", contentType)
-	result, err := uploader.Upload(&s3manager.UploadInput{
-		Bucket:      &bucket,
-		Key:         key,
-		Body:        file,
-		ContentType: &contentType,
-	})
 	if err != nil {
+		fmt.Println("error saving/uploading file", err)
 		w.Write([]byte(err.Error()))
 		return
 	}
-	w.Write([]byte(result.Location))
+
+	fmt.Printf("fURL %s\n", fURL)
+	w.Write([]byte(fURL))
+
 }
 
 func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
-	fmt.Println("method:", r.Method)
+	fmt.Println("handleUploadBase64 method:", r.Method)
 	body, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -184,113 +185,104 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 		return
 	}
 
-	bytes, err := base64.StdEncoding.DecodeString(data)
+	file, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
 	}
 
-	fmt.Println("File size: ", len(bytes))
-	dir, err := ioutil.TempDir("", "")
+	fmt.Println("File size: ", len(file))
+
+	fname := strings.Replace(r.Header.Get("File-Name"), " ", "_", -1)
+	var fURL string
+  if viper.GetBool("server.local") == true {
+		// local
+		fURL, err = saveToLocalFS(file, fname, contentType)
+
+	} else {
+		// upload
+		buf := bytes.NewReader(file)
+		fURL, err = uploadToS3(buf, fname, contentType)
+	}
+
 	if err != nil {
+		fmt.Println("error saving/uploading", err)
 		w.Write([]byte(err.Error()))
 		return
 	}
 
-	// viv
-	local := r.Header.Get("GoThumb-File-Location")
-	if local == "local" {
-		// tmpfn := filepath.Join(dir, r.Header.Get("File-Name"))
-		fileNoSpace := strings.Replace(r.Header.Get("File-Name"), " ", "_", -1)
-		localFilePath := filepath.Join("/tmp/", r.Header.Get("File-Name"))
-		if err := ioutil.WriteFile(localFilePath, bytes, 0666); err != nil {
-			w.Write([]byte(err.Error()))
-			return
-		}
+	fmt.Printf("fURL %s\n", fURL)
+	w.Write([]byte(fURL))
 
-		// viv
-		fmt.Println("localFilePath: ", localFilePath)
-
-		file, err := os.Open(localFilePath)
-		if err != nil {
-			w.Write([]byte(err.Error()))
-			return
-		}
-
-		filePath := filepath.Join("/files/", fileNoSpace)
-		fmt.Println("remote filePath: ", filePath)
-		w.Write([]byte(filePath))
-
-		if err := file.Close(); err != nil {
-			w.Write([]byte(err.Error()))
-			return
-		}
-
-		return
-	}
-	// viv
-
-	defer os.RemoveAll(dir)
-
-	tmpfn := filepath.Join(dir, r.Header.Get("File-Name"))
-	if err := ioutil.WriteFile(tmpfn, bytes, 0666); err != nil {
-		w.Write([]byte(err.Error()))
-		return
-	}
-
-	file, err := os.Open(tmpfn)
-	if err != nil {
-		w.Write([]byte(err.Error()))
-		return
-	}
-
-	fileInfo, err := file.Stat()
-	if err != nil {
-		w.Write([]byte(err.Error()))
-		return
-	}
-
-	config := &aws.Config{
-		Region: aws.String(viper.GetString("s3.region")),
-		Credentials: credentials.NewStaticCredentials(
-			viper.GetString("s3.access-key-id"),
-			viper.GetString("s3.secret-access-key"),
-			"",
-		),
-	}
-
-	sess, err := session.NewSession(config)
-	uploader := s3manager.NewUploader(sess)
-
-	// Perform an upload.
-	bucket := viper.GetString("s3.bucket")
-	var key = new(string)
-	h := md5.New()
-	fileNoSpace := strings.Replace(fileInfo.Name(), " ", "_", -1)
-	io.WriteString(h, fileNoSpace)
-	io.WriteString(h, time.Now().String())
-	s := hex.EncodeToString(h.Sum(nil))
-	*key = "files/" + s + "-" + fileNoSpace
-	fmt.Println("File type: ", contentType)
-	result, err := uploader.Upload(&s3manager.UploadInput{
-		Bucket:      &bucket,
-		Key:         key,
-		Body:        file,
-		ContentType: &contentType,
-	})
-	if err != nil {
-		w.Write([]byte(err.Error()))
-		return
-	}
-
-	w.Write([]byte(result.Location))
-
-  if err := file.Close(); err != nil {
-		w.Write([]byte(err.Error()))
-		return
-	}
 }
 
+func saveToLocalFS(file []byte, fname string, ftype string) (string, error) {
+	log.Println("Begin save to local fs: ", fname)
+
+	localFilePath := filepath.Join("/tmp/", fname)
+	remoteFilePath := filepath.Join("/files/", fname)
+	fmt.Printf("saveToLocalFS localFilePath: %s, remoteFilePath: %s \n", localFilePath, remoteFilePath)
+
+	if err := ioutil.WriteFile(localFilePath, file, 0666); err != nil {
+		fmt.Printf("error writing file: %s \n", err)
+		return "", err
+	}
+	//
+	// file, err := os.Open(localFilePath)
+	// if err != nil {
+	// 	fmt.Println("error opening file: %s", err)
+	// 	return "", err
+	// }
+	//
+	// if err := file.Close(); err != nil {
+	// 	fmt.Println("error closing file: %s", err)
+	// 	return "", err
+	// }
+
+	return remoteFilePath, nil
+}
+
+func uploadToS3(buf io.Reader, fname string, ftype string) (string, error) {
+		log.Println("Begin uploadToS3: ", fname)
+
+		config := &aws.Config{
+			Region: aws.String(viper.GetString("s3.region")),
+			Credentials: credentials.NewStaticCredentials(
+				viper.GetString("s3.access-key-id"),
+				viper.GetString("s3.secret-access-key"),
+				"",
+			),
+		}
+
+		sess, err := session.NewSession(config)
+		uploader := s3manager.NewUploader(sess)
+
+		// Perform an upload.
+		bucket := viper.GetString("s3.bucket")
+		var key = new(string)
+		h := md5.New()
+		io.WriteString(h, fname)
+		io.WriteString(h, time.Now().String())
+		s := hex.EncodeToString(h.Sum(nil))
+		*key = "files/" + s + "-" + fname
+		fmt.Println("File type: %s", ftype)
+		response, err := uploader.Upload(&s3manager.UploadInput{
+			Bucket:      &bucket,
+			Key:         key,
+			Body:        buf,
+			ContentType: &ftype,
+		})
+
+		if err != nil {
+			fmt.Printf("Error upload to S3: %s", err)
+			return "", err
+		}
+
+		return response.Location, nil
+}
+
+
+/* -----------------------   resize  ----------------------- */
 func handleResize(writer http.ResponseWriter, request *http.Request, params httprouter.Params) {
 	sourcePath := request.URL.EscapedPath()
 	width, height, err := parseWidthAndHeight(params.ByName("size"))
