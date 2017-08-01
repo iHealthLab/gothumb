@@ -61,6 +61,7 @@ func main() {
 	}
 
 	router := httprouter.New()
+	router.GET("/health", health)
 	router.GET("/file/:filename", getFile)
 	router.POST("/upload", handleUpload)
 	router.POST("/uploadBase64", handleUploadBase64)
@@ -70,6 +71,10 @@ func main() {
 	router.ServeFiles("/static/*filepath", http.Dir("/tmp/"))
 
 	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(viper.GetInt("server.port")), router))
+}
+
+func health(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+	w.WriteHeader(http.StatusOK)
 }
 
 /* -----------------------   download  ----------------------- */
@@ -195,7 +200,7 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 
 	fname := strings.Replace(r.Header.Get("File-Name"), " ", "_", -1)
 	var fURL string
-  if viper.GetBool("server.local") == true {
+	if viper.GetBool("server.local") == true {
 		// local
 		fURL, err = saveToLocalFS(file, fname, contentType)
 
@@ -243,42 +248,42 @@ func saveToLocalFS(file []byte, fname string, ftype string) (string, error) {
 }
 
 func uploadToS3(buf io.Reader, fname string, ftype string) (string, error) {
-		log.Println("Begin uploadToS3: ", fname)
+	log.Println("Begin uploadToS3: ", fname)
 
-		config := &aws.Config{
-			Region: aws.String(viper.GetString("s3.region")),
-			Credentials: credentials.NewStaticCredentials(
-				viper.GetString("s3.access-key-id"),
-				viper.GetString("s3.secret-access-key"),
-				"",
-			),
-		}
+	config := &aws.Config{
+		Region: aws.String(viper.GetString("s3.region")),
+		Credentials: credentials.NewStaticCredentials(
+			viper.GetString("s3.access-key-id"),
+			viper.GetString("s3.secret-access-key"),
+			"",
+		),
+	}
 
-		sess, err := session.NewSession(config)
-		uploader := s3manager.NewUploader(sess)
+	sess, err := session.NewSession(config)
+	uploader := s3manager.NewUploader(sess)
 
-		// Perform an upload.
-		bucket := viper.GetString("s3.bucket")
-		var key = new(string)
-		h := md5.New()
-		io.WriteString(h, fname)
-		io.WriteString(h, time.Now().String())
-		s := hex.EncodeToString(h.Sum(nil))
-		*key = "files/" + s + "-" + fname
-		fmt.Println("File type: %s", ftype)
-		response, err := uploader.Upload(&s3manager.UploadInput{
-			Bucket:      &bucket,
-			Key:         key,
-			Body:        buf,
-			ContentType: &ftype,
-		})
+	// Perform an upload.
+	bucket := viper.GetString("s3.bucket")
+	var key = new(string)
+	h := md5.New()
+	io.WriteString(h, fname)
+	io.WriteString(h, time.Now().String())
+	s := hex.EncodeToString(h.Sum(nil))
+	*key = "files/" + s + "-" + fname
+	fmt.Println("File type: %s", ftype)
+	response, err := uploader.Upload(&s3manager.UploadInput{
+		Bucket:      &bucket,
+		Key:         key,
+		Body:        buf,
+		ContentType: &ftype,
+	})
 
-		if err != nil {
-			fmt.Printf("Error upload to S3: %s", err)
-			return "", err
-		}
+	if err != nil {
+		fmt.Printf("Error upload to S3: %s", err)
+		return "", err
+	}
 
-		return response.Location, nil
+	return response.Location, nil
 }
 
 
