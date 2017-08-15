@@ -114,7 +114,7 @@ func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 		Bucket: &bucket,
 		Key:    key,
 	})
-	urlStr, err := req.Presign(time.Minute * viper.GetInt("s3.expireTimeMinutes"))
+	urlStr, err := req.Presign(time.Duration(viper.GetInt("s3.expireTimeMinutes")) * time.Minute)
 
 	if err != nil {
 		log.Println("Failed to sign request", err)
