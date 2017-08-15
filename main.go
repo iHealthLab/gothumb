@@ -114,7 +114,7 @@ func getFile(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 		Bucket: &bucket,
 		Key:    key,
 	})
-	urlStr, err := req.Presign(15 * time.Minute)
+	urlStr, err := req.Presign(viper.GetInt("s3.expiration") * time.Minute)
 
 	if err != nil {
 		log.Println("Failed to sign request", err)
@@ -203,7 +203,6 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 	if viper.GetBool("server.local") == true {
 		// local
 		fURL, err = saveToLocalFS(file, fname, contentType)
-
 	} else {
 		// upload
 		buf := bytes.NewReader(file)
@@ -223,7 +222,6 @@ func handleUploadBase64(w http.ResponseWriter, r *http.Request, params httproute
 
 func saveToLocalFS(file []byte, fname string, ftype string) (string, error) {
 	log.Println("Begin save to local fs: ", fname)
-
 	localFilePath := filepath.Join("/tmp/", fname)
 	remoteFilePath := filepath.Join("/files/", fname)
 	fmt.Printf("saveToLocalFS localFilePath: %s, remoteFilePath: %s \n", localFilePath, remoteFilePath)
@@ -232,17 +230,6 @@ func saveToLocalFS(file []byte, fname string, ftype string) (string, error) {
 		fmt.Printf("error writing file: %s \n", err)
 		return "", err
 	}
-	//
-	// file, err := os.Open(localFilePath)
-	// if err != nil {
-	// 	fmt.Println("error opening file: %s", err)
-	// 	return "", err
-	// }
-	//
-	// if err := file.Close(); err != nil {
-	// 	fmt.Println("error closing file: %s", err)
-	// 	return "", err
-	// }
 
 	return remoteFilePath, nil
 }
@@ -263,19 +250,17 @@ func uploadToS3(buf io.Reader, fname string, ftype string) (string, error) {
 	uploader := s3manager.NewUploader(sess)
 
 	// Perform an upload.
-	bucket := viper.GetString("s3.bucket")
-	var key = new(string)
 	h := md5.New()
 	io.WriteString(h, fname)
 	io.WriteString(h, time.Now().String())
 	s := hex.EncodeToString(h.Sum(nil))
-	*key = "files/" + s + "-" + fname
 	fmt.Println("File type: %s", ftype)
 	response, err := uploader.Upload(&s3manager.UploadInput{
-		Bucket:      &bucket,
-		Key:         key,
-		Body:        buf,
+		Bucket: aws.String(viper.GetString("s3.bucket")),
+		Key: aws.String("files/" + s + "-" + fname),
+		Body: buf,
 		ContentType: &ftype,
+		ServerSideEncryption: aws.String("AES256"),
 	})
 
 	if err != nil {
